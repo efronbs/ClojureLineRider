@@ -2,7 +2,7 @@
   (:import
     (javax.swing JFrame JPanel JButton Timer)
     (java.awt Dimension Color FlowLayout BasicStroke)
-    (java.awt.event ActionListener)
+    (java.awt.event ActionListener MouseListener)
     (java.awt.geom Ellipse2D Line2D)))
 
 (declare doNothing)
@@ -27,17 +27,40 @@
    :swingObj (new java.awt.geom.Line2D$Double x1 y1 x2 y2)})
 
 (defn newState []
-  {:mode :draw
-   :lines (list)
-   :drawingstyle :line})
+  {:lines (list)})
 
 ;Timer that sends update signals to the frame to repaint
 (defn updateTimer [world]
  (proxy [ActionListener] []
    (actionPerformed [e]
+
        (.revalidate world)
        (.repaint world)
    )))
+
+(defn drawListener [drawingState worldState]
+  (proxy [MouseListener] []
+
+    (mousePressed [e]
+      (let [x (.getX e)
+            y (.getY e)]
+        (dosync
+          (ref-set drawingState (assoc @drawingState :currentlyDrawing true))
+          (ref-set drawingState (assoc @drawingState :p1 [x y])))))
+
+    (mouseReleased [e]
+      (let [[startX startY] (@drawingState :p1)
+            endX (.getX e)
+            endY (.getY e)]
+        (dosync
+          (ref-set drawingState (assoc @drawingState :currentlyDrawing false))
+          (ref-set worldState (assoc @worldState :lines (cons (newLine startX startY endX endY) (@worldState :lines)))))))
+
+    (mouseEntered [e])
+
+    (mouseExited [e])
+
+    (mouseClicked [e])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;Function Model
@@ -77,6 +100,11 @@
 
 ;creates the simulation panel - everything happens here
 (defn worldPanel [state]
+
+  (def drawingState
+    (ref {:currentlyDrawing false
+          :start nil}))
+
   (let [p (proxy [JPanel] []
             (getPreferredSize []
               WORLDBOUNDS)
@@ -89,6 +117,8 @@
                     (do
                       (paint g (first lines))
                       (recur (rest lines)))))))]
+
+    (.addMouseListener p (drawListener drawingState state))
     (.setLayout p (FlowLayout.))
     (.setBackground p Color/white)
     p))
