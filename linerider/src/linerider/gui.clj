@@ -1,8 +1,8 @@
 (ns linerider.gui
   (:import
     (javax.swing JFrame JPanel JButton Timer)
-    (java.awt Dimension Color FlowLayout BasicStroke)
-    (java.awt.event ActionListener MouseListener)
+    (java.awt Dimension Color FlowLayout BasicStroke MouseInfo PointerInfo)
+    (java.awt.event ActionListener MouseListener MouseMotionListener)
     (java.awt.geom Ellipse2D Line2D)))
 
 (declare doNothing)
@@ -27,34 +27,51 @@
    :swingObj (new java.awt.geom.Line2D$Double x1 y1 x2 y2)})
 
 (defn newState []
-  {:lines (list)})
+  {:mode :none
+   :lines (list)})
 
 ;Timer that sends update signals to the frame to repaint
 (defn updateTimer [world]
  (proxy [ActionListener] []
    (actionPerformed [e]
-
        (.revalidate world)
        (.repaint world)
    )))
+
+(defn drawDragListener [drawingState worldState]
+  (proxy [MouseMotionListener] []
+
+    (mouseDragged [e]
+      (if (= (@worldState :mode) :line)
+        (let [mX (.getX e)
+              mY (.getY e)
+              [sX sY] (@drawingState :p1)]
+          (dosync
+            (ref-set drawingState (assoc @drawingState :swingObj (new java.awt.geom.Line2D$Double sX sY mX mY)))))))
+
+    (mouseMoved [e])))
+
 
 (defn drawListener [drawingState worldState]
   (proxy [MouseListener] []
 
     (mousePressed [e]
-      (let [x (.getX e)
-            y (.getY e)]
-        (dosync
-          (ref-set drawingState (assoc @drawingState :currentlyDrawing true))
-          (ref-set drawingState (assoc @drawingState :p1 [x y])))))
+      (if (= (@worldState :mode) :line)
+        (let [x (.getX e)
+              y (.getY e)]
+          (dosync
+            (ref-set drawingState (assoc @drawingState :currentlyDrawing true))
+            (ref-set drawingState (assoc @drawingState :p1 [x y]))
+            (ref-set drawingState (assoc @drawingState :swingObj (new java.awt.geom.Line2D$Double x y (+ x 1) (+ y 1))))))))
 
     (mouseReleased [e]
-      (let [[startX startY] (@drawingState :p1)
-            endX (.getX e)
-            endY (.getY e)]
-        (dosync
-          (ref-set drawingState (assoc @drawingState :currentlyDrawing false))
-          (ref-set worldState (assoc @worldState :lines (cons (newLine startX startY endX endY) (@worldState :lines)))))))
+      (if (= (@worldState :mode) :line)
+        (let [[startX startY] (@drawingState :p1)
+              endX (.getX e)
+              endY (.getY e)]
+          (dosync
+            (ref-set drawingState (assoc @drawingState :currentlyDrawing false))
+            (ref-set worldState (assoc @worldState :lines (cons (newLine startX startY endX endY) (@worldState :lines))))))))
 
     (mouseEntered [e])
 
@@ -71,12 +88,18 @@
    (actionPerformed [e]
      (println "nothing"))))
 
+(defn modeSet [mode state]
+  (proxy [ActionListener] []
+    (actionPerformed [e]
+      (dosync (ref-set state (assoc @state :mode mode))))))
+
 (defn paint [g line]
   (let [toDraw (line :swingObj)]
     (.setColor g Color/black)
     (.setStroke g (BasicStroke. 4))
     (.fill g toDraw)
     (.draw g toDraw)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;GUI
@@ -103,7 +126,8 @@
 
   (def drawingState
     (ref {:currentlyDrawing false
-          :start nil}))
+          :p1 nil
+          :swingObj nil}))
 
   (let [p (proxy [JPanel] []
             (getPreferredSize []
@@ -111,6 +135,10 @@
 
             (paintComponent [g]
               (proxy-super paintComponent g)
+
+              (if (@drawingState :currentlyDrawing)
+                    (paint g @drawingState))
+
               (loop [lines (@state :lines)]
                   (if (empty? lines)
                     :done
@@ -119,43 +147,31 @@
                       (recur (rest lines)))))))]
 
     (.addMouseListener p (drawListener drawingState state))
+    (.addMouseMotionListener p (drawDragListener drawingState state))
     (.setLayout p (FlowLayout.))
     (.setBackground p Color/white)
     p))
 
-(defn playButton []
-  (def listener (doNothing))
+
+(defn createButton [label listener]
   (let [b (JButton.)]
     (.addActionListener b listener)
-    (.setText b "play")
+    (.setText b label)
     b))
-
-(defn drawButton []
-  (def listener (doNothing))
-  (let [b (JButton.)]
-    (.addActionListener b listener)
-    (.setText b "draw")
-    b))
-
-(defn lineButton []
-  (def listener (doNothing))
-  (let [b (JButton.)]
-    (.addActionListener b listener)
-    (.setText b "line")
-    b))
-
 
 (defn createWorld []
+  ;create our state
+  (def state (ref (newState)))
 
   ;create our major gui objects
   (def controls (controlPanel))
-  (def world (worldPanel (ref (newState))))
+  (def world (worldPanel state))
   (def frame (gameFrame))
 
   ;add buttons to the control panel
-  (.add controls (playButton))
-  (.add controls (drawButton))
-  (.add controls (lineButton))
+  (.add controls (createButton "play" (doNothing)))
+  (.add controls (createButton "line" (modeSet :line state)))
+  (.add controls (createButton "none" (modeSet :none state)))
 
   (.add frame world)
   (.add frame controls)
