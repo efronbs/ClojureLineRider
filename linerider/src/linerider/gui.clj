@@ -40,11 +40,8 @@
 
 (defn handleDrawLineDrag [e drawingState offset]
   (let [[offX offY] offset
-        [baseSX baseSY] (@drawingState :p1)
-        mX (+ (.getX e) offX)
-        mY (+ (.getY e) offY)
-        sX (+ baseSX offX)
-        sY (+ baseSY offY)]
+        mX (- (.getX e) offX)
+        mY (- (.getY e) offY)]
     (dosync
       (ref-set drawingState (assoc @drawingState :p2 [mX mY])))))
 
@@ -71,8 +68,8 @@
     (mousePressed [e]
       (if (= (@worldState :mode) :line)
         (let [[offX offY] (@worldState :offset)
-              x (+ (.getX e) offX)
-              y (+ (.getY e) offY)]
+              x (- (.getX e) offX)
+              y (- (.getY e) offY)]
           (dosync
             (ref-set drawingState (assoc @drawingState :currentlyDrawing true))
             (ref-set drawingState (assoc @drawingState :p1 [x y]))
@@ -81,15 +78,11 @@
     (mouseReleased [e]
       (if (= (@worldState :mode) :line)
         (let [[offX offY] (@worldState :offset)
-              [baseSX baseSY] (@drawingState :p1)
-              startX (+ baseSX offX)
-              startY (+ baseSY offY)
-              endX (+ (.getX e) offX)
-              endY (+ (.getY e) offY)]
+              [sX sY] (@drawingState :p1)
+              [eX eY] (@drawingState :p2)]
           (dosync
             (ref-set drawingState (assoc @drawingState :currentlyDrawing false))
-            (ref-set drawingState (assoc @drawingState :p2 [endX endY]))
-            (ref-set worldState (assoc @worldState :lines (cons (newLine startX startY endX endY) (@worldState :lines))))))))
+            (ref-set worldState (assoc @worldState :lines (cons (newLine sX sY eX eY) (@worldState :lines))))))))
 
     (mouseEntered [e])
 
