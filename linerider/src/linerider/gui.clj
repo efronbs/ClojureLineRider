@@ -26,6 +26,7 @@
 (def FPS 24)
 (def UPDATERATE (/ 1000 FPS))
 (def ERASEDISTANCE 10) ;arbitrarily chosen
+(def OBSTACLE_SIDE_LENGTH 30) ;arbitrarily chosen
 (def GRAVITY 1)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -59,6 +60,20 @@
    :m (/ (- y2 y1) (- x2 x1))
    :b (- y1 (* (/ (- y2 y1) (- x2 x1)) x1))})
 
+; Description: Creates a new object
+;
+; Parameters: x - center x coordinate
+;             y - center y coordinate
+;
+; Return: map representing obstacle.
+; currently it is just the center, but architecting it like this would make it really simple to add different types of obstacles in the future
+;
+(defn newObstacle [x y]
+  (let [cornerX (- x (/ OBSTACLE_SIDE_LENGTH 2))
+        cornerY (- y (/ OBSTACLE_SIDE_LENGTH 2))]
+    {:center [x y]
+     :drawCorner [cornerX cornerY]}))
+
 ; Description: Creates a new state opject
 ;
 ; Parameters: None
@@ -68,6 +83,7 @@
   {:mode :line
    :offset [0 0]
    :lines (list)
+   :obstacles (list)
    :rider (newRider 100 100 20)})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -369,6 +385,27 @@
 
     (mouseExited [e])))
 
+
+(defn placeObstacleListener [worldState]
+  (proxy [MouseListener] []
+
+    (mouseClicked [e]
+      (if (= (@worldState :mode) :place_obstacle)
+        (let [baseX (.getX e)
+              baseY (.getY e)
+              [offX offY] (@worldState :offset)
+              finalX (+ baseX offX)
+              finalY (+ baseY offY)]
+        (dosync (ref-set worldState (assoc @worldState :obstacles (cons (newObstacle finalX finalY) (@worldState :obstacles))))))))
+
+    (mousePressed [e])
+
+    (mouseReleased [e])
+
+    (mouseEntered [e])
+
+    (mouseExited [e])))
+
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;Function Model
 ;;;;;;;;;;;;;;;;;;;;;;;
@@ -422,6 +459,10 @@
 ;             dragstate - local drag state in world panel
 ;
 ; Return: void
+;
+; sCOff = start of current offset
+; eCOff = end of current offset
+
 (defn paintLine [g line offset dragState]
   (let [[offX offY] offset
         [sCOffX sCOffY] (dragState :p1)
@@ -435,6 +476,32 @@
         toDraw (new java.awt.geom.Line2D$Double (+ sX  fullOffX) (+ sY fullOffY) (+ eX fullOffX) (+ eY fullOffY))]
     (.setColor g Color/black)
     (.setStroke g (BasicStroke. 4))
+    (.fill g toDraw)
+    (.draw g toDraw)))
+
+; Description: Paints obstacles
+;
+; Parameters: g - graphics object
+;             line - line object
+;             offset - offset based on screen drag; held in game state
+;             dragstate - local drag state in world panel
+;
+; Return: void
+;
+; sCOff = start of current offset
+; eCOff = end of current offset
+
+(defn paintObstacle [g obstacle offset dragState]
+  (let [[offX offY] offset
+        [sCOffX sCOffY] (dragState :p1)
+        [eCOffX eCOffY] (dragState :p2)
+        cOffX (- eCOffX sCOffX)
+        cOffY (- eCOffY sCOffY)
+        fullOffX (+ offX cOffX)
+        fullOffY (+ offY cOffY)
+        [x y] (obstacle :drawCorner)
+        toDraw (new java.awt.geom.Rectangle2D$Double (+ fullOffX x) (+ y fullOffY) OBSTACLE_SIDE_LENGTH OBSTACLE_SIDE_LENGTH)]
+    (.setColor g Color/red)
     (.fill g toDraw)
     (.draw g toDraw)))
 
@@ -523,11 +590,19 @@
                       (paintLine g (first lines) (@state :offset) @dragState)
                       (recur (rest lines)))))
 
+              (loop [obstacles (@state :obstacles)]
+                  (if (empty? obstacles)
+                    :done
+                    (do
+                      (paintObstacle g (first obstacles) (@state :offset) @dragState)
+                      (recur (rest obstacles)))))
+
               (paintRider g (@state :rider))))]
 
     (.addMouseListener p (drawListener drawingState state))
     (.addMouseListener p (dragClickListener dragState state))
     (.addMouseListener p (eraseListener state))
+    (.addMouseListener p (placeObstacleListener state))
     (.addMouseMotionListener p (dragListener drawingState dragState state))
     (.setLayout p (FlowLayout.))
     (.setBackground p Color/white)
@@ -565,6 +640,7 @@
   (.add controls (createButton "drag" (modeSet :drag state)))
   (.add controls (createButton "erase" (modeSet :erase state)))
   (.add controls (createButton "reset" (modeSet :reset state)))
+  (.add controls (createButton "place obstacle" (modeSet :place_obstacle state)))
 
   ; add keylistener to world
   (.setFocusable world true)
