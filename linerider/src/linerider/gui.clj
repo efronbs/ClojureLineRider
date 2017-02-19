@@ -1,16 +1,23 @@
+; Author1: Benjamin Efron
+; Author2: Justin Willoughby
+; Date: Winter 2016/17
+; Course: CSSE403 - Programming Language Paradigms
+;
+; Module Description: Gui/Editor functionality for our linerider project
+
 (ns linerider.gui
   (:import
     (javax.swing JFrame JPanel JButton Timer)
     (java.awt Dimension Color FlowLayout BasicStroke MouseInfo PointerInfo)
-    (java.awt.event ActionListener MouseListener MouseMotionListener)
+    (java.awt.event ActionListener MouseListener MouseMotionListener KeyListener)
     (java.awt.geom Ellipse2D Line2D)))
 
 (declare doNothing)
 (declare getDistanceToLine)
 
-;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;GLOBALS
-;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def FRAMEBOUNDS (Dimension. 1240 850))
 (def WORLDBOUNDS (Dimension. 1200 740))
@@ -18,53 +25,251 @@
 (def FPS 24)
 (def UPDATERATE (/ 1000 FPS))
 (def ERASEDISTANCE 10) ;arbitrarily chosen
+(def GRAVITY 1)
 
-;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;MUTABLE MODEL
-;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Description: Create a new rider object
+;
+; Parameters: x - x cord
+;             y - y cord
+;             size - radius of ball
+;
+; Return: rider
+(defn newRider [x y size]
+  {:cords [x y]
+   :size size
+   :xVel 0
+   :yVel 0})
+
+; Description: Creates a new line object
+;
+; Parameters: x1 - starting x cord
+;             y1 - starting y cord
+;             x2 - ending x cord
+;             y2 - ending y cord
+;
+; Return: line
 (defn newLine [x1 y1 x2 y2]
   {:p1 [x1 y1]
-   :p2 [x2 y2]})
+   :p2 [x2 y2]
+   :m (/ (- y2 y1) (- x2 x1))
+   :b (- y1 (* (/ (- y2 y1) (- x2 x1)) x1))})
 
+; Description: Creates a new state opject
+;
+; Parameters: None
+;
+; Return: worldState
 (defn newState []
   {:mode :line
    :offset [0 0]
-   :lines (list)})
+   :lines (list)
+   :rider (newRider 100 100 20)})
 
-;Timer that sends update signals to the frame to repaint
-(defn updateTimer [world]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Game physics
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Description: Gets the absolute value of the given number
+;
+; Parameters: n - number
+;
+; Return: absolute value of n
+(defn abs [n]
+  (if (< n 0)
+    (- n)
+    n))
+
+; Description: Returns the reciprocal of the given number
+;
+; Parameters: n - number
+;
+; Return: reciprocal of n
+(defn reciprocal [n]
+  (if (= n 0)
+    0
+    (/ 1 n)))
+
+; Description: Applies gravity to the rider
+;
+; Parameters: rider - rider specified in world state
+;
+; Return: Updated rider
+(defn applyGravity [rider]
+(assoc rider :yVel (+ (rider :yVel) GRAVITY)))
+
+; Description: Checks whether the rider is colliding with any lines
+;
+; Parameters: rider - rider specified in world state
+;             lsLines - list of lines draw in the world, held in world state
+;
+; Return: List [bool, line] where bool is whether collision was found
+;         and the where line is the offending line
+(defn collidingWithLine [rider lsLines]
+ (let [[xcord ycord] (rider :cords)]
+   (loop [lines lsLines]
+     (if (empty? lines)
+       [:false, {}]
+       (let [currentLine (first lines)
+             p1 (currentLine :p1)
+             p2 (currentLine :p2)
+             [x1 y1] p1
+             [x2 y2] p2]
+           (if (and (< (abs (- ycord (+ (* (currentLine :m) xcord) (currentLine :b)))) (rider :size))
+                    (or (and (> xcord x1) (< xcord x2)) (and (< xcord x1) (> xcord x2))))
+             [:true, currentLine]
+             (recur (rest lines))))))))
+
+; Description: Makes the rider jump by increasing yVel
+;
+; Parameters: rider - rider specified in world state
+;
+; Return: Updated rider
+(defn jump [rider]
+  (assoc rider :yVel (- (rider :yVel) 10)))
+
+; Description: Updates the riders velocity on collision with given line
+;
+; Parameters: rider - rider specified in world state
+;             line - line that the rider is coliding with
+;
+; Return: Updated rider
+(defn updateVelocityOnCollision [rider line]
+ (assoc rider :xVel (reciprocal (line :m))
+              :yVel (line :m)))
+
+; Description: Handles collisions between the rider and the lines
+;
+; Parameters: state - world state
+;
+; Return: void
+(defn handleCollisions [state]
+ (let [rider (state :rider)
+       lines (state :lines)
+       collision (collidingWithLine rider lines)
+       [bool line] collision]
+     (if (= bool :true)
+       (do
+         (updateVelocityOnCollision rider line))
+       (do
+         (applyGravity rider)))))
+
+; Description: Updates the rider's x and y cords based on xvel and yvel
+;              Also applies gravity to rider
+;
+; Parameters: rider - rider specified in the world state
+;
+; Return: void
+(defn updateRider [rider]
+ (let [[xcord ycord] (rider :cords)]
+     (assoc rider :cords [(+ xcord (rider :xVel)) (+ ycord (rider :yVel))])))
+
+; Description: Applies game physics to rider
+;
+; Parameters: None
+;
+; Return: void
+(defn applyGamePhysics [state]
+ (do
+   (dosync (ref-set state (assoc @state :rider (updateRider (state :rider)))))
+   (dosync (ref-set state (assoc @state :rider (handleCollisions state))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Listeners
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Description: Dummy ActionListener
+;
+; Parameters: None
+;
+; Return: ActionListener
+(defn doNothing []
  (proxy [ActionListener] []
    (actionPerformed [e]
-       (.revalidate world)
-       (.repaint world)
-   )))
+     (println "nothing"))))
 
+; Description: ActionListener to set the game mode
+;
+; Parameters: mode - mode to set the game to
+;             state - world state
+;
+; Return: ActionListener
+(defn modeSet [mode state]
+  (proxy [ActionListener] []
+    (actionPerformed [e]
+      (dosync (ref-set state (assoc @state :mode mode))))))
+
+; Description: Timer that sends update signals to the frame to repaint
+;
+; Parameters: world - world panel
+;
+; Return: ActionListener
+(defn updateTimer [world]
+  (proxy [ActionListener] []
+  (actionPerformed [e]
+     (.revalidate world)
+     (.repaint world)
+  )))
+
+; Description: Handles setting the drawing state
+;
+; Parameters: e - MouseMotionListener event
+;             drawingState - current drawing state
+;             offset - current offset; held in the world state
+;
+; Return: void
 (defn handleDrawLineDrag [e drawingState offset]
   (let [[offX offY] offset
-        mX (- (.getX e) offX)
-        mY (- (.getY e) offY)]
+      mX (- (.getX e) offX)
+      mY (- (.getY e) offY)]
     (dosync
       (ref-set drawingState (assoc @drawingState :p2 [mX mY])))))
 
+; Description: Handles setting the drag state
+;
+; Parameters: e - MouseMotionListener event
+;             dragState - current drag state
+;             worldState - world state
+;
+; Return: void
 (defn handleMoveDrag [e dragState worldState]
   (let [[cOffX cOffY] (@worldState :offset)
-        newOffX (+ (.getX e) cOffX)
-        newOffY (+ (.getY e) cOffY)]
-    (dosync (ref-set dragState (assoc @dragState :p2 [newOffX newOffY])))))
+      newOffX (+ (.getX e) cOffX)
+      newOffY (+ (.getY e) cOffY)]
+    (dosync
+      (ref-set dragState (assoc @dragState :p2 [newOffX newOffY])))))
 
-
+; Description: Drag MouseMotionListener, determines what to do when the mouseDragged
+;              is dragged. If the mode is line, then it should draw line,
+;              else, it should drag the screen
+;
+; Parameters: drawingState - current drawing state
+;             dragState - current drag state
+;             worldState - world state
+;
+; Return: MouseMotionListener
 (defn dragListener [drawingState dragState worldState]
   (proxy [MouseMotionListener] []
 
     (mouseDragged [e]
-      (if (= (@worldState :mode) :line)
-        (handleDrawLineDrag e drawingState (@worldState :offset))
-        (if (= (@worldState :mode) :drag)
-          (handleMoveDrag e dragState worldState))))
+      (case (@worldState :mode)
+        :line
+          (handleDrawLineDrag e drawingState (@worldState :offset))
+        :drag
+          (handleMoveDrag e dragState worldState)
+        "default"))
 
     (mouseMoved [e])))
 
+; Description: Draw MouseListener, used to create lines in editor
+;
+; Parameters: drawingState - current drawing state
+;             worldState - world state
+;
+; Return: MouseListener
 (defn drawListener [drawingState worldState]
   (proxy [MouseListener] []
 
@@ -93,6 +298,13 @@
 
     (mouseClicked [e])))
 
+; Description: Drag MouseListener, used to handle drag when mouse
+;              is pressed and released
+;
+; Parameters: dragState - current drag state
+;             worldState - world state
+;
+; Return: MouseListener
 (defn dragClickListener [dragState worldState]
   (proxy [MouseListener] []
 
@@ -124,7 +336,6 @@
     (mouseExited [e])
 
     (mouseClicked [e])))
-
 
 (defn eraseListener [worldState]
   (proxy [MouseListener] []
@@ -176,7 +387,35 @@
     (actionPerformed [e]
       (dosync (ref-set state (assoc @state :mode mode))))))
 
-(defn paint [g line offset dragState]
+; Description: KeyListener to handle jumping
+;
+; Parameters: state - world state
+;
+; Return: KeyListener
+(defn keyBoardListener [state]
+  (proxy [KeyListener] []
+
+    (keyPressed [e]
+      (if (and (= (.getKeyCode e) 32) (= (state :mode) :play))
+        (dosync (ref-set state (assoc @state :rider (jump (state :rider)))))))
+
+    (keyReleased [e])
+
+    (keyTyped [e])))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; GUI Updaters
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Description: Paints line
+;
+; Parameters: g - graphics object
+;             line - line object
+;             offset - offset based on screen drag; held in game state
+;             dragstate - local drag state in world panel
+;
+; Return: void
+(defn paintLine [g line offset dragState]
   (let [[offX offY] offset
         [sCOffX sCOffY] (dragState :p1)
         [eCOffX eCOffY] (dragState :p2)
@@ -192,11 +431,30 @@
     (.fill g toDraw)
     (.draw g toDraw)))
 
-;;;;;;;;;;;;;;;;;;;;;;;
-;GUI
-;;;;;;;;;;;;;;;;;;;;;;;
+; Description: Paints rider object
+;
+; Parameters: g - graphics object
+;             rider - rider object
+;
+; Return: void
+(defn paintRider [g rider]
+  (let [[xcord ycord] (rider :cords)
+        rad (rider :size)
+        toDraw (new java.awt.geom.Ellipse2D$Double xcord ycord rad rad)]
+      (.setStroke g (BasicStroke. 1))
+      (.setColor g Color/blue)
+      (.fill g toDraw)
+      (.draw g toDraw)))
 
-;creates the frame to load our panels into
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;GUI
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Description: Creates the main frame to load our panels into
+;
+; Parameters: None
+;
+; Return: JFrame
 (defn gameFrame []
   (let [f (proxy [JFrame] []
             (getPreferredSize []
@@ -204,7 +462,11 @@
       (.setLayout f (FlowLayout.))
       f))
 
-;creates a panel for buttons
+; Description: Creates a panel for buttons
+;
+; Parameters: None
+;
+; Return: JPanel
 (defn controlPanel []
   (let [p (proxy [JPanel] []
             (getPreferredSize []
@@ -212,7 +474,11 @@
       (.setLayout p (FlowLayout.))
       p))
 
-;creates the simulation panel - everything happens here
+; Description: Creates the simulation panel - everything happens here
+;
+; Parameters: state - Specified world state
+;
+; Return: JPanel
 (defn worldPanel [state]
 
   (def drawingState
@@ -233,14 +499,24 @@
               (proxy-super paintComponent g)
 
               (if (@drawingState :currentlyDrawing)
-                    (paint g @drawingState (@state :offset) @dragState))
+                (paintLine g @drawingState (@state :offset) @dragState))
+
+              (if (= (@state :mode) :play)
+                (do
+                  (.requestFocus this)
+                  (applyGamePhysics state)))
+
+              (if (= (@state :mode) :reset)
+                (dosync (ref-set state (newState))))
 
               (loop [lines (@state :lines)]
                   (if (empty? lines)
                     :done
                     (do
-                      (paint g (first lines) (@state :offset) @dragState)
-                      (recur (rest lines)))))))]
+                      (paintLine g (first lines) (@state :offset) @dragState)
+                      (recur (rest lines)))))
+
+              (paintRider g (@state :rider))))]
 
     (.addMouseListener p (drawListener drawingState state))
     (.addMouseListener p (dragClickListener dragState state))
@@ -250,13 +526,23 @@
     (.setBackground p Color/white)
     p))
 
-
+; Description: Creates a button using the given label and buttonListener
+;
+; Parameters: label - JLabel to init the button with
+;             listener - ActionListener to init the button with
+;
+; Return: JButton
 (defn createButton [label listener]
   (let [b (JButton.)]
     (.addActionListener b listener)
     (.setText b label)
     b))
 
+; Description: Initializes everything, and opens up the frame
+;
+; Parameters: None
+;
+; Return: void
 (defn createWorld []
   ;create our state
   (def state (ref (newState)))
@@ -267,16 +553,28 @@
   (def frame (gameFrame))
 
   ;add buttons to the control panel
-  (.add controls (createButton "play" (doNothing)))
+  (.add controls (createButton "play" (modeSet :play state)))
   (.add controls (createButton "line" (modeSet :line state)))
   (.add controls (createButton "drag" (modeSet :drag state)))
   (.add controls (createButton "erase" (modeSet :erase state)))
+  (.add controls (createButton "reset" (modeSet :reset state)))
 
+  ; add keylistener to world
+  (.setFocusable world true)
+  (.addKeyListener world (keyBoardListener state))
+
+  ; add world panel to our frame
   (.add frame world)
+
+  ; add control panel to our frame
   (.add frame controls)
 
+
+
+  ; start world update timer
   (.start (Timer. UPDATERATE (updateTimer world)))
 
+  ; frame logistics
   (.pack frame)
   (.setVisible frame true)
   (.setDefaultCloseOperation frame JFrame/EXIT_ON_CLOSE))
