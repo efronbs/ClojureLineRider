@@ -394,8 +394,8 @@
         (let [baseX (.getX e)
               baseY (.getY e)
               [offX offY] (@worldState :offset)
-              finalX (+ baseX offX)
-              finalY (+ baseY offY)]
+              finalX (- baseX offX)
+              finalY (- baseY offY)]
         (dosync (ref-set worldState (assoc @worldState :obstacles (cons (newObstacle finalX finalY) (@worldState :obstacles))))))))
 
     (mousePressed [e])
@@ -511,10 +511,17 @@
 ;             rider - rider object
 ;
 ; Return: void
-(defn paintRider [g rider]
+(defn paintRider [g rider offset dragState]
   (let [[xcord ycord] (rider :cords)
+        [offX offY] offset
+        [sCOffX sCOffY] (dragState :p1)
+        [eCOffX eCOffY] (dragState :p2)
+        cOffX (- eCOffX sCOffX)
+        cOffY (- eCOffY sCOffY)
+        fullOffX (+ offX cOffX)
+        fullOffY (+ offY cOffY)
         rad (rider :size)
-        toDraw (new java.awt.geom.Ellipse2D$Double xcord ycord rad rad)]
+        toDraw (new java.awt.geom.Ellipse2D$Double (+ fullOffX xcord) (+ ycord fullOffY) rad rad)]
       (.setStroke g (BasicStroke. 1))
       (.setColor g Color/blue)
       (.fill g toDraw)
@@ -597,7 +604,7 @@
                       (paintObstacle g (first obstacles) (@state :offset) @dragState)
                       (recur (rest obstacles)))))
 
-              (paintRider g (@state :rider))))]
+              (paintRider g (@state :rider) (@state :offset) @dragState)))]
 
     (.addMouseListener p (drawListener drawingState state))
     (.addMouseListener p (dragClickListener dragState state))
