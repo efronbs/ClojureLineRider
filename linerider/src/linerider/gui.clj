@@ -6,6 +6,7 @@
     (java.awt.geom Ellipse2D Line2D)))
 
 (declare doNothing)
+(declare getDistanceToLine)
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;GLOBALS
@@ -16,6 +17,7 @@
 (def CONTROLBOUNDS (Dimension. 1200 100))
 (def FPS 24)
 (def UPDATERATE (/ 1000 FPS))
+(def ERASEDISTANCE 10) ;arbitrarily chosen
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;MUTABLE MODEL
@@ -58,7 +60,8 @@
     (mouseDragged [e]
       (if (= (@worldState :mode) :line)
         (handleDrawLineDrag e drawingState (@worldState :offset))
-        (handleMoveDrag e dragState worldState)))
+        (if (= (@worldState :mode) :drag)
+          (handleMoveDrag e dragState worldState))))
 
     (mouseMoved [e])))
 
@@ -122,9 +125,46 @@
 
     (mouseClicked [e])))
 
+
+(defn eraseListener [worldState]
+  (proxy [MouseListener] []
+
+    (mouseClicked [e]
+      (if (= (@worldState :mode) :erase)
+        (let [mX (.getX e)
+              mY (.getY e)
+              [lineToErase dToLine]  (loop [lines (@worldState :lines)
+                       closestLine nil
+                       smallestDistance Integer/MAX_VALUE]
+                  (if (empty? lines)
+                    [closestLine smallestDistance]
+                    (let [currentLine (first lines)
+                          distance (getDistanceToLine currentLine [mX mY])]
+                      (if (< distance smallestDistance)
+                        (recur (rest lines) currentLine distance)
+                        (recur (rest lines) closestLine smallestDistance)))))]
+          (if (< dToLine ERASEDISTANCE)
+            (println lineToErase)
+            (println :none)))))
+
+    (mousePressed [e])
+
+    (mouseReleased [e])
+
+    (mouseEntered [e])
+
+    (mouseExited [e])))
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;Function Model
 ;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn getDistanceToLine [line point]
+  (let [[mX mY] point
+        [x1 y1] (line :p1)
+        [x2 y2] (line :p2)
+        top (Math/abs (- (+ (- (* (- y2 y1) mX) (* (- x2 x1) mY)) (* x2 y1)) (* y2 x1)))
+        bot (Math/sqrt (+ (Math/pow (- y2 y1) 2) (Math/pow (- x2 x1) 2)))]
+    (/ top bot)))
 
 (defn doNothing []
  (proxy [ActionListener] []
@@ -204,6 +244,7 @@
 
     (.addMouseListener p (drawListener drawingState state))
     (.addMouseListener p (dragClickListener dragState state))
+    (.addMouseListener p (eraseListener state))
     (.addMouseMotionListener p (dragListener drawingState dragState state))
     (.setLayout p (FlowLayout.))
     (.setBackground p Color/white)
@@ -229,6 +270,7 @@
   (.add controls (createButton "play" (doNothing)))
   (.add controls (createButton "line" (modeSet :line state)))
   (.add controls (createButton "drag" (modeSet :drag state)))
+  (.add controls (createButton "erase" (modeSet :erase state)))
 
   (.add frame world)
   (.add frame controls)
