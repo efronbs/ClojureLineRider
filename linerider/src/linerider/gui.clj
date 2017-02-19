@@ -14,6 +14,7 @@
 
 (declare doNothing)
 (declare getDistanceToLine)
+(declare dropNth)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;GLOBALS
@@ -344,19 +345,21 @@
       (if (= (@worldState :mode) :erase)
         (let [mX (.getX e)
               mY (.getY e)
-              [lineToErase dToLine]  (loop [lines (@worldState :lines)
+              [lineToErase dToLine indexOfSmallest]
+                (loop [lines (@worldState :lines)
+                       index 0
                        closestLine nil
-                       smallestDistance Integer/MAX_VALUE]
+                       smallestDistance Integer/MAX_VALUE
+                       rIndex -1]
                   (if (empty? lines)
-                    [closestLine smallestDistance]
+                    [closestLine smallestDistance rIndex]
                     (let [currentLine (first lines)
                           distance (getDistanceToLine currentLine [mX mY])]
                       (if (< distance smallestDistance)
-                        (recur (rest lines) currentLine distance)
-                        (recur (rest lines) closestLine smallestDistance)))))]
+                        (recur (rest lines) (+ index 1) currentLine distance index)
+                        (recur (rest lines) (+ index 1) closestLine smallestDistance rIndex)))))]
           (if (< dToLine ERASEDISTANCE)
-            (println lineToErase)
-            (println :none)))))
+            (dosync (ref-set worldState (assoc @worldState :lines (dropNth (@worldState :lines) indexOfSmallest))))))))
 
     (mousePressed [e])
 
@@ -365,9 +368,13 @@
     (mouseEntered [e])
 
     (mouseExited [e])))
+
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;Function Model
 ;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn dropNth [seq index]
+  (concat (take index seq) (nthrest seq (inc index))))
 
 (defn getDistanceToLine [line point]
   (let [[mX mY] point
