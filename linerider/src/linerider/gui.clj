@@ -9,7 +9,7 @@
   (:import
     (javax.swing JFrame JPanel JButton Timer)
     (java.awt Dimension Color FlowLayout BasicStroke MouseInfo PointerInfo)
-    (java.awt.event ActionListener MouseListener MouseMotionListener)
+    (java.awt.event ActionListener MouseListener MouseMotionListener KeyListener)
     (java.awt.geom Ellipse2D Line2D)))
 
 (declare doNothing)
@@ -67,17 +67,150 @@
    :lines (list)
    :rider (newRider 100 100 20)})
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Game physics
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Description: Gets the absolute value of the given number
+;
+; Parameters: n - number
+;
+; Return: absolute value of n
+(defn abs [n]
+  (if (< n 0)
+    (- n)
+    n))
+
+; Description: Returns the reciprocal of the given number
+;
+; Parameters: n - number
+;
+; Return: reciprocal of n
+(defn reciprocal [n]
+  (if (= n 0)
+    0
+    (/ 1 n)))
+
+; Description: Applies gravity to the rider
+;
+; Parameters: rider - rider specified in world state
+;
+; Return: Updated rider
+(defn applyGravity [rider]
+(assoc rider :yVel (+ (rider :yVel) GRAVITY)))
+
+; Description: Checks whether the rider is colliding with any lines
+;
+; Parameters: rider - rider specified in world state
+;             lsLines - list of lines draw in the world, held in world state
+;
+; Return: List [bool, line] where bool is whether collision was found
+;         and the where line is the offending line
+(defn collidingWithLine [rider lsLines]
+ (let [[xcord ycord] (rider :cords)]
+   (loop [lines lsLines]
+     (if (empty? lines)
+       [:false, {}]
+       (let [currentLine (first lines)
+             p1 (currentLine :p1)
+             p2 (currentLine :p2)
+             [x1 y1] p1
+             [x2 y2] p2]
+           (if (and (< (abs (- ycord (+ (* (currentLine :m) xcord) (currentLine :b)))) (rider :size))
+                    (or (and (> xcord x1) (< xcord x2)) (and (< xcord x1) (> xcord x2))))
+             [:true, currentLine]
+             (recur (rest lines))))))))
+
+; Description: Makes the rider jump by increasing yVel
+;
+; Parameters: rider - rider specified in world state
+;
+; Return: Updated rider
+(defn jump [rider]
+  (assoc rider :yVel (- (rider :yVel) 10)))
+
+; Description: Updates the riders velocity on collision with given line
+;
+; Parameters: rider - rider specified in world state
+;             line - line that the rider is coliding with
+;
+; Return: Updated rider
+(defn updateVelocityOnCollision [rider line]
+ (assoc rider :xVel (reciprocal (line :m))
+              :yVel (line :m)))
+
+; Description: Handles collisions between the rider and the lines
+;
+; Parameters: state - world state
+;
+; Return: void
+(defn handleCollisions [state]
+ (let [rider (state :rider)
+       lines (state :lines)
+       collision (collidingWithLine rider lines)
+       [bool line] collision]
+     (if (= bool :true)
+       (do
+         (updateVelocityOnCollision rider line))
+       (do
+         (applyGravity rider)))))
+
+; Description: Updates the rider's x and y cords based on xvel and yvel
+;              Also applies gravity to rider
+;
+; Parameters: rider - rider specified in the world state
+;
+; Return: void
+(defn updateRider [rider]
+ (let [[xcord ycord] (rider :cords)]
+     (assoc rider :cords [(+ xcord (rider :xVel)) (+ ycord (rider :yVel))])))
+
+; Description: Applies game physics to rider
+;
+; Parameters: None
+;
+; Return: void
+(defn applyGamePhysics [state]
+ (do
+   (dosync (ref-set state (assoc @state :rider (updateRider (state :rider)))))
+   (dosync (ref-set state (assoc @state :rider (handleCollisions state))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Listeners
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Description: Dummy ActionListener
+;
+; Parameters: None
+;
+; Return: ActionListener
+(defn doNothing []
+ (proxy [ActionListener] []
+   (actionPerformed [e]
+     (println "nothing"))))
+
+; Description: ActionListener to set the game mode
+;
+; Parameters: mode - mode to set the game to
+;             state - world state
+;
+; Return: ActionListener
+(defn modeSet [mode state]
+  (proxy [ActionListener] []
+    (actionPerformed [e]
+      (dosync (ref-set state (assoc @state :mode mode))))))
+
 ; Description: Timer that sends update signals to the frame to repaint
 ;
 ; Parameters: world - world panel
 ;
 ; Return: ActionListener
 (defn updateTimer [world]
- (proxy [ActionListener] []
-   (actionPerformed [e]
-       (.revalidate world)
-       (.repaint world)
-   )))
+  (proxy [ActionListener] []
+  (actionPerformed [e]
+     (.revalidate world)
+     (.repaint world)
+  )))
 
 ; Description: Handles setting the drawing state
 ;
@@ -88,8 +221,8 @@
 ; Return: void
 (defn handleDrawLineDrag [e drawingState offset]
   (let [[offX offY] offset
-        mX (- (.getX e) offX)
-        mY (- (.getY e) offY)]
+      mX (- (.getX e) offX)
+      mY (- (.getY e) offY)]
     (dosync
       (ref-set drawingState (assoc @drawingState :p2 [mX mY])))))
 
@@ -102,8 +235,8 @@
 ; Return: void
 (defn handleMoveDrag [e dragState worldState]
   (let [[cOffX cOffY] (@worldState :offset)
-        newOffX (+ (.getX e) cOffX)
-        newOffY (+ (.getY e) cOffY)]
+      newOffX (+ (.getX e) cOffX)
+      newOffY (+ (.getY e) cOffY)]
     (dosync
       (ref-set dragState (assoc @dragState :p2 [newOffX newOffY])))))
 
@@ -202,40 +335,25 @@
 
     (mouseClicked [e])))
 
+; Description: KeyListener to handle jumping
+;
+; Parameters: state - world state
+;
+; Return: KeyListener
+(defn keyBoardListener [state]
+  (proxy [KeyListener] []
+
+    (keyPressed [e]
+      (if (and (= (.getKeyCode e) 32) (= (state :mode) :play))
+        (dosync (ref-set state (assoc @state :rider (jump (state :rider)))))))
+
+    (keyReleased [e])
+
+    (keyTyped [e])))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;Function Model
+; GUI Updaters
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Description: Gets the absolute value of the given number
-;
-; Parameters: n - number
-;
-; Return: absolute value of n
-(defn abs [n]
-  (if (< n 0)
-    (- n)
-    n))
-
-; Description: Dummy ActionListener
-;
-; Parameters: None
-;
-; Return: ActionListener
-(defn doNothing []
- (proxy [ActionListener] []
-   (actionPerformed [e]
-     (println "nothing"))))
-
-; Description: ActionListener to set the game mode
-;
-; Parameters: mode - mode to set the game to
-;             state - world state
-;
-; Return: ActionListener
-(defn modeSet [mode state]
-  (proxy [ActionListener] []
-    (actionPerformed [e]
-      (dosync (ref-set state (assoc @state :mode mode))))))
 
 ; Description: Paints line
 ;
@@ -275,66 +393,6 @@
       (.setColor g Color/blue)
       (.fill g toDraw)
       (.draw g toDraw)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Game physics
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-; Description: Checks whether the rider is colliding with any lines
-;
-; Parameters: rider - rider specified in world state
-;             lsLines - list of lines draw in the world, held in world state
-;
-; Return: List [bool, line] where bool is whether collision was found
-;         and the where line is the offending line
-(defn collidingWithLine [rider lsLines]
-  (let [[xcord ycord] (rider :cords)]
-    (loop [lines lsLines]
-      (let [currentLine (first lines)]
-        (if (empty? lines)
-          [:false, {}]
-          (if (< (abs (- ycord (+ (* (currentLine :m) xcord) (currentLine :b)))) (rider :size))
-            [:true, currentLine]
-            (recur (rest lines))))))))
-
-; Description: Handles collisions between the rider and the lines
-;
-; Parameters: state - world state
-;
-; Return: void
-(defn handleCollisions [state]
-  (let [rider (state :rider)
-        lines (state :lines)
-        collision (collidingWithLine rider lines)
-        [bool line] collision]
-      (if (= bool :true)
-        (do
-          (println "Colliding with line, update velocities to follow line")
-          rider)
-        (do
-          (println "No collisions")
-          rider))))
-
-; Description: Updates the rider's x and y cords based on xvel and yvel
-;              Also applies gravity to rider
-;
-; Parameters: rider - rider specified in the world state
-;
-; Return: void
-(defn updateRider [rider]
-  (let [[xcord ycord] (rider :cords)]
-      (assoc rider :cords [(+ xcord (rider :xVel)) (+ ycord (rider :yVel))]
-                   :yVel (+ (rider :yVel) GRAVITY))))
-
-; Description: Applies game physics to rider
-;
-; Parameters: None
-;
-; Return: void
-(defn applyGamePhysics [state]
-  (do
-    (dosync (ref-set state (assoc @state :rider (updateRider (state :rider)))))
-    (dosync (ref-set state (assoc @state :rider (handleCollisions state))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;GUI
@@ -392,7 +450,12 @@
                 (paintLine g @drawingState (@state :offset) @dragState))
 
               (if (= (@state :mode) :play)
-                (applyGamePhysics state))
+                (do
+                  (.requestFocus this)
+                  (applyGamePhysics state)))
+
+              (if (= (@state :mode) :reset)
+                (dosync (ref-set state (newState))))
 
               (loop [lines (@state :lines)]
                   (if (empty? lines)
@@ -440,11 +503,19 @@
   (.add controls (createButton "play" (modeSet :play state)))
   (.add controls (createButton "line" (modeSet :line state)))
   (.add controls (createButton "drag" (modeSet :drag state)))
+  (.add controls (createButton "reset" (modeSet :reset state)))
+
+  ; add keylistener to world
+  (.setFocusable world true)
+  (.addKeyListener world (keyBoardListener state))
 
   ; add world panel to our frame
   (.add frame world)
+
   ; add control panel to our frame
   (.add frame controls)
+
+
 
   ; start world update timer
   (.start (Timer. UPDATERATE (updateTimer world)))
