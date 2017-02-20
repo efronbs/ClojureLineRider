@@ -15,6 +15,7 @@
 (declare doNothing)
 (declare getDistanceToLine)
 (declare dropNth)
+(declare getAcceleration)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;GLOBALS
@@ -56,10 +57,25 @@
 ;
 ; Return: line
 (defn newLine [x1 y1 x2 y2]
-  {:p1 [x1 y1]
-   :p2 [x2 y2]
-   :m (/ (- y2 y1) (- x2 x1))
-   :b (- y1 (* (/ (- y2 y1) (- x2 x1)) x1))})
+  (let [[x1 x2](if (= x1 x2) [x1 (+ 1 x1)] [x1 x2])
+        [rx1 ry1 rx2 ry2] (if (> (- x2 x1) 0)
+                            [x1 y1 x2 y2]
+                            [x2 y2 x1 y1])
+
+         m  (/ (- ry2 ry1) (- rx2 rx1))
+         b  (- ry1 (* (/ (- ry2 ry1) (- rx2 rx1)) rx1))
+         vector (Math/sqrt (+ (Math/pow (- ry2 ry1) 2) (Math/pow (- rx2 rx1) 2)))
+         angle (Math/atan m)
+         vX (* vector (Math/cos angle))
+         vY (* vector (Math/sin angle))]
+    {:p1 [rx1 ry1]
+     :p2 [rx2 ry2]
+     :m   m
+     :b   b
+     :vector vector
+     :angle angle
+     :vX vX
+     :vY vY}))
 
 ; Description: Creates a new object
 ;
@@ -152,6 +168,31 @@
                  :jumping true)
     rider))
 
+; angle pre computed for efficiency
+(defn getAcceleration [line]
+  (let [angle (line :angle)
+        forceParallel (* GRAVITY (Math/sin angle))
+        accelX (* forceParallel (Math/cos angle))
+        accelY (* forceParallel (Math/sin angle))]
+    [accelX accelY]))
+
+(defn updateVelocityOnCollision [rider line]
+  (let [angle (line :angle)
+        [accelX accelY] (getAcceleration line)
+        riderXVel (rider :xVel)
+        riderYVel (rider :yVel)
+        vX (line :vX)
+        vY (line :vY)
+        directionOfVelocity (if (< (+ (* riderXVel vX) (* riderYVel vY)) 0) -1 1)
+        riderVMag (* (Math/sqrt (+ (Math/pow riderXVel 2) (Math/pow riderYVel 2))) directionOfVelocity)
+        rotatedRiderXVel (* riderVMag (Math/cos angle))
+        rotatedRiderYVel (* riderVMag (Math/sin angle))
+        finalRiderVelX (+ rotatedRiderXVel accelX)
+        finalRiderVelY (+ rotatedRiderYVel accelY)]
+    (assoc rider :xVel finalRiderVelX
+                 :yVel  finalRiderVelY
+                 :jumping false)))
+
 
 ; Description: Updates the riders velocity on collision with given line
 ;
@@ -159,30 +200,30 @@
 ;             line - line that the rider is coliding with
 ;
 ; Return: Updated rider
-(defn updateVelocityOnCollision [rider line]
-    (let [
-
-          currentXVel (rider :xVel)
-          currentYVel (rider :yVel)
-          angle (Math/atan (line :m))
-          forceGravity GRAVITY
-          forcePerpendicularX (* currentXVel (Math/sin angle))
-          forcePerpendicularY (* (+ currentYVel forceGravity) (Math/cos angle))
-          forceParallel (* forceGravity (Math/sin angle))
-          AccelX (* forceParallel (Math/sin (- (/ Math/PI 2) angle)))
-          AccelY (* forceParallel (Math/cos (- (/ Math/PI 2) angle)))
-          PerpendicularX (* forcePerpendicularX (Math/cos (- (/ Math/PI 2) angle)))
-          PerpendicularY (* forcePerpendicularY (Math/sin (- (/ Math/PI 2) angle)))
-          newXVel (- (+ currentXVel AccelX) PerpendicularX)
-          newYVel (- (+ currentYVel AccelY) PerpendicularY)
-
-        ]
-        (do (println "Values -----------------------------------------")
-            (println "Angle " (Math/toDegrees angle) " AccelX " AccelX " AccelY " AccelY " NewXVel " newXVel " NewYVel " newYVel)
-            (println)
-          (assoc rider :xVel newXVel
-                       :yVel newYVel
-                       :jumping false))))
+; (defn updateVelocityOnCollision [rider line]
+;     (let [
+;
+;           currentXVel (rider :xVel)
+;           currentYVel (rider :yVel)
+;           angle (Math/atan (line :m))
+;           forceGravity GRAVITY
+;           forcePerpendicularX (* currentXVel (Math/sin angle))
+;           forcePerpendicularY (* (+ currentYVel forceGravity) (Math/cos angle))
+;           forceParallel (* forceGravity (Math/sin angle))
+;           AccelX (* forceParallel (Math/sin (- (/ Math/PI 2) angle)))
+;           AccelY (* forceParallel (Math/cos (- (/ Math/PI 2) angle)))
+;           PerpendicularX (* forcePerpendicularX (Math/cos (- (/ Math/PI 2) angle)))
+;           PerpendicularY (* forcePerpendicularY (Math/sin (- (/ Math/PI 2) angle)))
+;           newXVel (- (+ currentXVel AccelX) PerpendicularX)
+;           newYVel (- (+ currentYVel AccelY) PerpendicularY)
+;
+;         ]
+;         (do (println "Values -----------------------------------------")
+;             (println "Angle " (Math/toDegrees angle) " AccelX " AccelX " AccelY " AccelY " NewXVel " newXVel " NewYVel " newYVel)
+;             (println)
+;           (assoc rider :xVel newXVel
+;                        :yVel newYVel
+;                        :jumping false))))
 
 ; Description: Handles collisions between the rider and the lines
 ;
