@@ -26,9 +26,10 @@
 (def CONTROLBOUNDS (Dimension. 1200 100))
 (def FPS 24)
 (def UPDATERATE (/ 1000 FPS))
+(def SNAPRATE 500)
 (def ERASEDISTANCE 10) ;arbitrarily chosen
 (def OBSTACLE_SIDE_LENGTH 30) ;arbitrarily chosen
-(def GRAVITY 1)
+(def GRAVITY 0.5)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;MUTABLE MODEL
@@ -43,7 +44,7 @@
 ; Return: rider
 (defn newRider []
   {:cords [100 100]
-   :size 20
+   :size 10
    :xVel 0
    :yVel 0
    :jumping false})
@@ -57,7 +58,8 @@
 ;
 ; Return: line
 (defn newLine [x1 y1 x2 y2]
-  (let [[rx1 ry1 rx2 ry2] (if (> (- x2 x1) 0)
+  (let [[x1 x2] (if (= x1 x2) [x1 (+ 1 x1)] [x1 x2])
+        [rx1 ry1 rx2 ry2] (if (> (- x2 x1) 0)
                             [x1 y1 x2 y2]
                             [x2 y2 x1 y1])
          m  (/ (- ry2 ry1) (- rx2 rx1))
@@ -154,6 +156,21 @@
                     (or (and (> xcord x1) (< xcord x2)) (and (< xcord x1) (> xcord x2))))
              [true, currentLine]
              (recur (rest lines))))))))
+
+; (defn collidingWithLine [rider lsLines]
+;  (let [[xcord ycord] (rider :cords)]
+;    (loop [lines lsLines]
+;      (if (empty? lines)
+;        [false, {}]
+;        (let [currentLine (first lines)
+;              p1 (currentLine :p1)
+;              p2 (currentLine :p2)
+;              [x1 y1] p1
+;              [x2 y2] p2]
+;            (if (and (< (getDistanceToLine currentLine [xcord ycord]) (/ (rider :size) 2))
+;                     (or (and (> xcord x1) (< xcord x2)) (and (< xcord x1) (> xcord x2))))
+;              [true, currentLine]
+;              (recur (rest lines))))))))
 
 (defn collidingWithObstacle [rider lsobstacles]
   (let [[xcord ycord] (rider :cords)]
@@ -301,6 +318,21 @@
      (.revalidate world)
      (.repaint world)
   )))
+
+  ; (defn newRider []
+  ; {:cords [100 100]
+  ;  :size 20
+  ;  :xVel 0
+  ;  :yVel 0
+  ;  :jumping false})
+;
+; (defn snapRiderTimer [worldState]
+;   (proxy [ActionListener] []
+;     (actionPerformed [e]
+;       (let [rider (state :rider)
+;             [drawX drawY] (rider :cords)
+;             []
+
 
 ; Description: Handles setting the drawing state
 ;
@@ -592,7 +624,7 @@
         fullOffX (+ offX cOffX)
         fullOffY (+ offY cOffY)
         rad (rider :size)
-        toDraw (new java.awt.geom.Ellipse2D$Double (+ fullOffX xcord) (+ ycord fullOffY) rad rad)]
+        toDraw (new java.awt.geom.Ellipse2D$Double (+ fullOffX (- xcord rad)) (+ (- ycord rad) fullOffY) (* 2 rad) (* 2 rad))]
       (.setStroke g (BasicStroke. 1))
       (.setColor g Color/blue)
       (.fill g toDraw)
