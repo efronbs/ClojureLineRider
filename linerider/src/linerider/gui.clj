@@ -41,9 +41,9 @@
 ;             size - radius of ball
 ;
 ; Return: rider
-(defn newRider [x y size]
-  {:cords [x y]
-   :size size
+(defn newRider []
+  {:cords [100 100]
+   :size 20
    :xVel 0
    :yVel 0
    :jumping false})
@@ -57,11 +57,9 @@
 ;
 ; Return: line
 (defn newLine [x1 y1 x2 y2]
-  (let [[x1 x2](if (= x1 x2) [x1 (+ 1 x1)] [x1 x2])
-        [rx1 ry1 rx2 ry2] (if (> (- x2 x1) 0)
+  (let [[rx1 ry1 rx2 ry2] (if (> (- x2 x1) 0)
                             [x1 y1 x2 y2]
                             [x2 y2 x1 y1])
-
          m  (/ (- ry2 ry1) (- rx2 rx1))
          b  (- ry1 (* (/ (- ry2 ry1) (- rx2 rx1)) rx1))
          vector (Math/sqrt (+ (Math/pow (- ry2 ry1) 2) (Math/pow (- rx2 rx1) 2)))
@@ -101,7 +99,7 @@
    :offset [0 0]
    :lines (list)
    :obstacles (list)
-   :rider (newRider 100 100 20)})
+   :rider (newRider)})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Game physics
@@ -146,7 +144,7 @@
  (let [[xcord ycord] (rider :cords)]
    (loop [lines lsLines]
      (if (empty? lines)
-       [:false, {}]
+       [false, {}]
        (let [currentLine (first lines)
              p1 (currentLine :p1)
              p2 (currentLine :p2)
@@ -154,8 +152,20 @@
              [x2 y2] p2]
            (if (and (< (abs (- ycord (+ (* (currentLine :m) xcord) (currentLine :b)))) (rider :size))
                     (or (and (> xcord x1) (< xcord x2)) (and (< xcord x1) (> xcord x2))))
-             [:true, currentLine]
+             [true, currentLine]
              (recur (rest lines))))))))
+
+(defn collidingWithObstacle [rider lsobstacles]
+  (let [[xcord ycord] (rider :cords)]
+    (loop [obstacles lsobstacles]
+      (if (empty? obstacles)
+        [false, {}]
+        (let [currentObstacle (first obstacles)
+              center (currentObstacle :center)
+              [c1 c2] center]
+            (if ( < (Math/sqrt (+ (Math/pow (- xcord c1) 2) (Math/pow (- ycord c2) 2))) (+ (rider :size) ( / OBSTACLE_SIDE_LENGTH 2)))
+              [true, currentObstacle]
+              (recur (rest obstacles))))))))
 
 ; Description: Makes the rider jump by increasing yVel
 ;
@@ -168,7 +178,6 @@
                  :jumping true)
     rider))
 
-; angle pre computed for efficiency
 (defn getAcceleration [line]
   (let [angle (line :angle)
         forceParallel (* GRAVITY (Math/sin angle))
@@ -176,7 +185,14 @@
         accelY (* forceParallel (Math/sin angle))]
     [accelX accelY]))
 
-(defn updateVelocityOnCollision [rider line]
+
+; Description: Updates the riders velocity on collision with given line
+;
+; Parameters: rider - rider specified in world state
+;             line - line that the rider is coliding with
+;
+; Return: Updated rider
+(defn updateVelocityOnCollisionLine [rider line]
   (let [angle (line :angle)
         [accelX accelY] (getAcceleration line)
         riderXVel (rider :xVel)
@@ -193,37 +209,19 @@
                  :yVel  finalRiderVelY
                  :jumping false)))
 
-
-; Description: Updates the riders velocity on collision with given line
-;
-; Parameters: rider - rider specified in world state
-;             line - line that the rider is coliding with
-;
-; Return: Updated rider
-; (defn updateVelocityOnCollision [rider line]
-;     (let [
-;
-;           currentXVel (rider :xVel)
-;           currentYVel (rider :yVel)
-;           angle (Math/atan (line :m))
-;           forceGravity GRAVITY
-;           forcePerpendicularX (* currentXVel (Math/sin angle))
-;           forcePerpendicularY (* (+ currentYVel forceGravity) (Math/cos angle))
-;           forceParallel (* forceGravity (Math/sin angle))
-;           AccelX (* forceParallel (Math/sin (- (/ Math/PI 2) angle)))
-;           AccelY (* forceParallel (Math/cos (- (/ Math/PI 2) angle)))
-;           PerpendicularX (* forcePerpendicularX (Math/cos (- (/ Math/PI 2) angle)))
-;           PerpendicularY (* forcePerpendicularY (Math/sin (- (/ Math/PI 2) angle)))
-;           newXVel (- (+ currentXVel AccelX) PerpendicularX)
-;           newYVel (- (+ currentYVel AccelY) PerpendicularY)
-;
-;         ]
-;         (do (println "Values -----------------------------------------")
-;             (println "Angle " (Math/toDegrees angle) " AccelX " AccelX " AccelY " AccelY " NewXVel " newXVel " NewYVel " newYVel)
-;             (println)
-;           (assoc rider :xVel newXVel
-;                        :yVel newYVel
-;                        :jumping false))))
+(defn updateVelocityOnCollisionObstacle [rider obstacle]
+  (let [
+        currentXVel (rider :xVel)
+        currentYVel (rider :yVel)
+        newXVel 0
+        newYVel 0
+       ]
+     (do (println "Values -----------------------------------------")
+         (println " NewXVel " newXVel " NewYVel " newYVel)
+         (println)
+       (assoc rider :xVel newXVel
+                    :yVel newYVel
+                    :jumping false))))
 
 ; Description: Handles collisions between the rider and the lines
 ;
@@ -233,13 +231,19 @@
 (defn handleCollisions [state]
  (let [rider (state :rider)
        lines (state :lines)
-       collision (collidingWithLine rider lines)
-       [bool line] collision]
-     (if (= bool :true)
+       obstacles (state :obstacles)
+       collisionLine (collidingWithLine rider lines)
+       collisionObstacle (collidingWithObstacle rider obstacles)
+       [lineBool line] collisionLine
+       [obstacleBool obstacle] collisionObstacle]
+     (if obstacleBool
        (do
-         (updateVelocityOnCollision rider line))
-       (do
-         (applyGravity rider)))))
+         (updateVelocityOnCollisionObstacle rider obstacle))
+       (if lineBool
+         (do
+           (updateVelocityOnCollisionLine rider line))
+         (do
+           (applyGravity rider))))))
 
 ; Description: Updates the rider's x and y cords based on xvel and yvel
 ;              Also applies gravity to rider
@@ -655,7 +659,7 @@
                   (applyGamePhysics state)))
 
               (if (= (@state :mode) :reset)
-                (dosync (ref-set state (newState))))
+                (dosync (ref-set state (assoc @state :rider (newRider)))))
 
               (loop [lines (@state :lines)]
                   (if (empty? lines)
