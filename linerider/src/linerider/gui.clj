@@ -44,7 +44,8 @@
   {:cords [x y]
    :size size
    :xVel 0
-   :yVel 0})
+   :yVel 0
+   :jumping false})
 
 ; Description: Creates a new line object
 ;
@@ -146,7 +147,11 @@
 ;
 ; Return: Updated rider
 (defn jump [rider]
-  (assoc rider :yVel (- (rider :yVel) 10)))
+  (if (not (rider :jumping))
+    (assoc rider :yVel (- (rider :yVel) 10)
+                 :jumping true)
+    rider))
+
 
 ; Description: Updates the riders velocity on collision with given line
 ;
@@ -155,8 +160,29 @@
 ;
 ; Return: Updated rider
 (defn updateVelocityOnCollision [rider line]
- (assoc rider :xVel (reciprocal (line :m))
-              :yVel (line :m)))
+    (let [
+
+          currentXVel (rider :xVel)
+          currentYVel (rider :yVel)
+          angle (Math/atan (line :m))
+          forceGravity GRAVITY
+          forcePerpendicularX (* currentXVel (Math/sin angle))
+          forcePerpendicularY (* (+ currentYVel forceGravity) (Math/cos angle))
+          forceParallel (* forceGravity (Math/sin angle))
+          AccelX (* forceParallel (Math/sin (- (/ Math/PI 2) angle)))
+          AccelY (* forceParallel (Math/cos (- (/ Math/PI 2) angle)))
+          PerpendicularX (* forcePerpendicularX (Math/cos (- (/ Math/PI 2) angle)))
+          PerpendicularY (* forcePerpendicularY (Math/sin (- (/ Math/PI 2) angle)))
+          newXVel (- (+ currentXVel AccelX) PerpendicularX)
+          newYVel (- (+ currentYVel AccelY) PerpendicularY)
+
+        ]
+        (do (println "Values -----------------------------------------")
+            (println "Angle " (Math/toDegrees angle) " AccelX " AccelX " AccelY " AccelY " NewXVel " newXVel " NewYVel " newYVel)
+            (println)
+          (assoc rider :xVel newXVel
+                       :yVel newYVel
+                       :jumping false))))
 
 ; Description: Handles collisions between the rider and the lines
 ;
