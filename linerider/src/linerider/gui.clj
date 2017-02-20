@@ -167,7 +167,7 @@
 ;
 ; Return: Updated rider
 (defn applyGravity [rider]
-(assoc rider :yVel (+ (rider :yVel) GRAVITY)))
+  (assoc rider :yVel (+ (rider :yVel) GRAVITY)))
 
 ; Description: Checks whether the rider is colliding with any lines
 ;
@@ -296,8 +296,11 @@
        (if lineBool
          (do
            (updateVelocityOnCollisionLine rider line))
-         (do
-           (applyGravity rider))))))
+         (let [[offsetx offsety] (state :offset)]
+           (do
+             (dosync (ref-set state (assoc @state :offset [offsetx (- offsety GRAVITY)])))
+             (applyGravity rider)))))))
+
 
 ; Description: Updates the rider's x and y cords based on xvel and yvel
 ;              Also applies gravity to rider
@@ -315,9 +318,15 @@
 ;
 ; Return: void
 (defn applyGamePhysics [state]
- (do
-   (dosync (ref-set state (assoc @state :rider (updateRider (state :rider)))))
-   (dosync (ref-set state (assoc @state :rider (handleCollisions state))))))
+  (let [rider (state :rider)
+        xVel (rider :xVel)
+        yVel (rider :yVel)
+        [xOffset yOffset] (state :offset)
+        updatedRider (updateRider rider)]
+    (do
+     (dosync (ref-set state (assoc @state :rider updatedRider
+                                          :offset [(- xOffset xVel) (- yOffset yVel)])))
+     (dosync (ref-set state (assoc @state :rider (handleCollisions state)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Listeners
@@ -344,7 +353,7 @@
     (actionPerformed [e]
       (do
         (if (= mode :play)
-          (dosync (ref-set state (assoc @state :offset [100 100])))
+          (dosync (ref-set state (assoc @state :offset [(- 600 100) (- 370 100)])))
           (dosync (ref-set state (assoc @state :offset [0 0]))))
         (dosync (ref-set state (assoc @state :mode mode)))))))
 
