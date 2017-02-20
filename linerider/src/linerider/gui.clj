@@ -353,7 +353,9 @@
     (actionPerformed [e]
       (do
         (if (= mode :play)
-          (dosync (ref-set state (assoc @state :offset [(- 600 100) (- 370 100)])))
+          (let [rider (state :rider)
+                [x y] (rider :cords)]
+            (dosync (ref-set state (assoc @state :offset [(- 600 x) (- 370 y)]))))
           (dosync (ref-set state (assoc @state :offset [0 0]))))
         (dosync (ref-set state (assoc @state :mode mode)))))))
 
