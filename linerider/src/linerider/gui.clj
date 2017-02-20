@@ -28,7 +28,7 @@
 (def UPDATERATE (/ 1000 FPS))
 (def SNAPRATE 500)
 (def ERASEDISTANCE 10) ;arbitrarily chosen
-(def OBSTACLE_SIDE_LENGTH 30) ;arbitrarily chosen
+(def OBSTACLE_SIDE_LENGTH 20) ;arbitrarily chosen
 (def GRAVITY 0.5)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -95,7 +95,7 @@
 ;
 ; Parameters: None
 ;
-; Return: worldState
+; Return: state
 (defn newState []
   {:mode :line
    :offset [0 0]
@@ -127,6 +127,40 @@
     0
     (/ 1 n)))
 
+; Description: Removes the nth element from a sequence
+;
+; Parameters: seq - sequence object
+;             index - index to remove
+;
+; Return:
+(defn dropNth [seq index]
+  (concat (take index seq) (nthrest seq (inc index))))
+
+; Description: Gets the distance from a point to a line
+;
+; Parameters: line - line to get distance to
+;             point - point to get distance from
+;
+; Return: distance to line from point
+(defn getDistanceToLine [line point]
+  (let [[mX mY] point
+        [x1 y1] (line :p1)
+        [x2 y2] (line :p2)
+        top (Math/abs (- (+ (- (* (- y2 y1) mX) (* (- x2 x1) mY)) (* x2 y1)) (* y2 x1)))
+        bot (Math/sqrt (+ (Math/pow (- y2 y1) 2) (Math/pow (- x2 x1) 2)))]
+    (/ top bot)))
+
+; Description: Gets the distance from a point to a obstacle
+;
+; Parameters: obstacle - obstacle to get distance to
+;             point - point to get distance from
+;
+; Return: distance to obstacle from point
+(defn getDistanceToObstacle [obstacle point]
+  (let [[x1 y1] point
+        [x2 y2] (obstacle :center)]
+      (Math/sqrt (+ (Math/pow (- y2 y1) 2) (Math/pow (- x2 x1) 2)))))
+
 ; Description: Applies gravity to the rider
 ;
 ; Parameters: rider - rider specified in world state
@@ -157,21 +191,13 @@
              [true, currentLine]
              (recur (rest lines))))))))
 
-; (defn collidingWithLine [rider lsLines]
-;  (let [[xcord ycord] (rider :cords)]
-;    (loop [lines lsLines]
-;      (if (empty? lines)
-;        [false, {}]
-;        (let [currentLine (first lines)
-;              p1 (currentLine :p1)
-;              p2 (currentLine :p2)
-;              [x1 y1] p1
-;              [x2 y2] p2]
-;            (if (and (< (getDistanceToLine currentLine [xcord ycord]) (/ (rider :size) 2))
-;                     (or (and (> xcord x1) (< xcord x2)) (and (< xcord x1) (> xcord x2))))
-;              [true, currentLine]
-;              (recur (rest lines))))))))
-
+; Description: Checks whether the rider is colliding with any obstacles
+;
+; Parameters: rider - rider specified in world state
+;             lsobstacles - list of obstacles draw in the world, held in world state
+;
+; Return: List [bool, obstacle] where bool is whether collision was found
+;         and the where obstacle is the offending obstacle
 (defn collidingWithObstacle [rider lsobstacles]
   (let [[xcord ycord] (rider :cords)]
     (loop [obstacles lsobstacles]
@@ -191,10 +217,15 @@
 ; Return: Updated rider
 (defn jump [rider]
   (if (not (rider :jumping))
-    (assoc rider :yVel (- (rider :yVel) 10)
+    (assoc rider :yVel (- (rider :yVel) 8)
                  :jumping true)
     rider))
 
+; Description: Gets the acceleration
+;
+; Parameters: line - line colliding with ball
+;
+; Return: [accelX accelY] updated acceleration list
 (defn getAcceleration [line]
   (let [angle (line :angle)
         forceParallel (* GRAVITY (Math/sin angle))
@@ -226,6 +257,12 @@
                  :yVel  finalRiderVelY
                  :jumping false)))
 
+; Description: Updates the riders velocity on collision with given obstacle
+;
+; Parameters: rider - rider specified in world state
+;             obstacle - obstacle that the rider is coliding with
+;
+; Return: Updated rider
 (defn updateVelocityOnCollisionObstacle [rider obstacle]
   (let [
         currentXVel (rider :xVel)
@@ -238,7 +275,7 @@
          (println)
        (assoc rider :xVel newXVel
                     :yVel newYVel
-                    :jumping false))))
+                    :jumping true))))
 
 ; Description: Handles collisions between the rider and the lines
 ;
@@ -305,7 +342,11 @@
 (defn modeSet [mode state]
   (proxy [ActionListener] []
     (actionPerformed [e]
-      (dosync (ref-set state (assoc @state :mode mode))))))
+      (do
+        (if (= mode :play)
+          (dosync (ref-set state (assoc @state :offset [100 100])))
+          (dosync (ref-set state (assoc @state :offset [0 0]))))
+        (dosync (ref-set state (assoc @state :mode mode)))))))
 
 ; Description: Timer that sends update signals to the frame to repaint
 ;
@@ -326,7 +367,7 @@
   ;  :yVel 0
   ;  :jumping false})
 ;
-; (defn snapRiderTimer [worldState]
+; (defn snapRiderTimer [state]
 ;   (proxy [ActionListener] []
 ;     (actionPerformed [e]
 ;       (let [rider (state :rider)
@@ -352,11 +393,11 @@
 ;
 ; Parameters: e - MouseMotionListener event
 ;             dragState - current drag state
-;             worldState - world state
+;             state - world state
 ;
 ; Return: void
-(defn handleMoveDrag [e dragState worldState]
-  (let [[cOffX cOffY] (@worldState :offset)
+(defn handleMoveDrag [e dragState state]
+  (let [[cOffX cOffY] (@state :offset)
       newOffX (+ (.getX e) cOffX)
       newOffY (+ (.getY e) cOffY)]
     (dosync
@@ -368,18 +409,18 @@
 ;
 ; Parameters: drawingState - current drawing state
 ;             dragState - current drag state
-;             worldState - world state
+;             state - world state
 ;
 ; Return: MouseMotionListener
-(defn dragListener [drawingState dragState worldState]
+(defn dragListener [drawingState dragState state]
   (proxy [MouseMotionListener] []
 
     (mouseDragged [e]
-      (case (@worldState :mode)
+      (case (@state :mode)
         :line
-          (handleDrawLineDrag e drawingState (@worldState :offset))
+          (handleDrawLineDrag e drawingState (@state :offset))
         :drag
-          (handleMoveDrag e dragState worldState)
+          (handleMoveDrag e dragState state)
         "default"))
 
     (mouseMoved [e])))
@@ -387,15 +428,15 @@
 ; Description: Draw MouseListener, used to create lines in editor
 ;
 ; Parameters: drawingState - current drawing state
-;             worldState - world state
+;             state - world state
 ;
 ; Return: MouseListener
-(defn drawListener [drawingState worldState]
+(defn drawListener [drawingState state]
   (proxy [MouseListener] []
 
     (mousePressed [e]
-      (if (= (@worldState :mode) :line)
-        (let [[offX offY] (@worldState :offset)
+      (if (= (@state :mode) :line)
+        (let [[offX offY] (@state :offset)
               x (- (.getX e) offX)
               y (- (.getY e) offY)]
           (dosync
@@ -404,13 +445,13 @@
             (ref-set drawingState (assoc @drawingState :p2 [(+ x 1) (+ y 1)]))))))
 
     (mouseReleased [e]
-      (if (= (@worldState :mode) :line)
-        (let [[offX offY] (@worldState :offset)
+      (if (= (@state :mode) :line)
+        (let [[offX offY] (@state :offset)
               [sX sY] (@drawingState :p1)
               [eX eY] (@drawingState :p2)]
           (dosync
             (ref-set drawingState (assoc @drawingState :currentlyDrawing false))
-            (ref-set worldState (assoc @worldState :lines (cons (newLine sX sY eX eY) (@worldState :lines))))))))
+            (ref-set state (assoc @state :lines (cons (newLine sX sY eX eY) (@state :lines))))))))
 
     (mouseEntered [e])
 
@@ -422,15 +463,15 @@
 ;              is pressed and released
 ;
 ; Parameters: dragState - current drag state
-;             worldState - world state
+;             state - world state
 ;
 ; Return: MouseListener
-(defn dragClickListener [dragState worldState]
+(defn dragClickListener [dragState state]
   (proxy [MouseListener] []
 
     (mousePressed [e]
-      (if (= (@worldState :mode) :drag)
-        (let [[offX offY] (@worldState :offset)
+      (if (= (@state :mode) :drag)
+        (let [[offX offY] (@state :offset)
               x (+ (.getX e) offX)
               y (+ (.getY e) offY)]
           (dosync
@@ -439,8 +480,8 @@
             (ref-set dragState (assoc @dragState :p2 [x y]))))))
 
     (mouseReleased [e]
-      (if (= (@worldState :mode) :drag)
-        (let [[baseOffX baseOffY] (@worldState :offset)
+      (if (= (@state :mode) :drag)
+        (let [[baseOffX baseOffY] (@state :offset)
               [sX sY] (@dragState :p1)
               [eX eY] (@dragState :p2)
               newXDif (- eX sX)
@@ -449,7 +490,7 @@
             (ref-set dragState (assoc @dragState :currentlyDragging false))
             (ref-set dragState (assoc @dragState :p1 [0 0]))
             (ref-set dragState (assoc @dragState :p2 [0 0]))
-            (ref-set worldState (assoc @worldState :offset [(+ baseOffX newXDif) (+ baseOffY newYDif)]))))))
+            (ref-set state (assoc @state :offset [(+ baseOffX newXDif) (+ baseOffY newYDif)]))))))
 
     (mouseEntered [e])
 
@@ -457,15 +498,20 @@
 
     (mouseClicked [e])))
 
-(defn eraseListener [worldState]
+; Description: Mouse Listener to handle erasing
+;
+; Parameters: state - world state
+;
+; Return: MouseListener
+(defn eraseListener [state]
   (proxy [MouseListener] []
 
     (mouseClicked [e]
-      (if (= (@worldState :mode) :erase)
+      (if (= (@state :mode) :erase)
         (let [mX (.getX e)
               mY (.getY e)
               [lineToErase dToLine indexOfSmallest]
-                (loop [lines (@worldState :lines)
+                (loop [lines (@state :lines)
                        index 0
                        closestLine nil
                        smallestDistance Integer/MAX_VALUE
@@ -476,9 +522,25 @@
                           distance (getDistanceToLine currentLine [mX mY])]
                       (if (< distance smallestDistance)
                         (recur (rest lines) (+ index 1) currentLine distance index)
-                        (recur (rest lines) (+ index 1) closestLine smallestDistance rIndex)))))]
-          (if (< dToLine ERASEDISTANCE)
-            (dosync (ref-set worldState (assoc @worldState :lines (dropNth (@worldState :lines) indexOfSmallest))))))))
+                        (recur (rest lines) (+ index 1) closestLine smallestDistance rIndex)))))
+              [obstacleToErase dToobstacle indexOfSmallestOb]
+                (loop [obstacles (@state :obstacles)
+                       index 0
+                       closestobstacle nil
+                       smallestDistance Integer/MAX_VALUE
+                       rIndex -1]
+                  (if (empty? obstacles)
+                    [closestobstacle smallestDistance rIndex]
+                    (let [currentobstacle (first obstacles)
+                          distance (getDistanceToObstacle currentobstacle [mX mY])]
+                      (if (< distance smallestDistance)
+                        (recur (rest obstacles) (+ index 1) currentobstacle distance index)
+                        (recur (rest obstacles) (+ index 1) closestobstacle smallestDistance rIndex)))))]
+          (do
+            (if (< dToLine ERASEDISTANCE)
+              (dosync (ref-set state (assoc @state :lines (dropNth (@state :lines) indexOfSmallest)))))
+            (if (< dToobstacle ERASEDISTANCE)
+              (dosync (ref-set state (assoc @state :obstacles (dropNth (@state :obstacles) indexOfSmallestOb)))))))))
 
     (mousePressed [e])
 
@@ -488,18 +550,22 @@
 
     (mouseExited [e])))
 
-
-(defn placeObstacleListener [worldState]
+; Description: Mouse Listener to handle placing objects
+;
+; Parameters: state - world state
+;
+; Return: MouseListener
+(defn placeObstacleListener [state]
   (proxy [MouseListener] []
 
     (mouseClicked [e]
-      (if (= (@worldState :mode) :place_obstacle)
+      (if (= (@state :mode) :place_obstacle)
         (let [baseX (.getX e)
               baseY (.getY e)
-              [offX offY] (@worldState :offset)
+              [offX offY] (@state :offset)
               finalX (- baseX offX)
               finalY (- baseY offY)]
-        (dosync (ref-set worldState (assoc @worldState :obstacles (cons (newObstacle finalX finalY) (@worldState :obstacles))))))))
+        (dosync (ref-set state (assoc @state :obstacles (cons (newObstacle finalX finalY) (@state :obstacles))))))))
 
     (mousePressed [e])
 
@@ -508,31 +574,6 @@
     (mouseEntered [e])
 
     (mouseExited [e])))
-
-;;;;;;;;;;;;;;;;;;;;;;;
-;Function Model
-;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn dropNth [seq index]
-  (concat (take index seq) (nthrest seq (inc index))))
-
-(defn getDistanceToLine [line point]
-  (let [[mX mY] point
-        [x1 y1] (line :p1)
-        [x2 y2] (line :p2)
-        top (Math/abs (- (+ (- (* (- y2 y1) mX) (* (- x2 x1) mY)) (* x2 y1)) (* y2 x1)))
-        bot (Math/sqrt (+ (Math/pow (- y2 y1) 2) (Math/pow (- x2 x1) 2)))]
-    (/ top bot)))
-
-(defn doNothing []
- (proxy [ActionListener] []
-   (actionPerformed [e]
-     (println "nothing"))))
-
-(defn modeSet [mode state]
-  (proxy [ActionListener] []
-    (actionPerformed [e]
-      (dosync (ref-set state (assoc @state :mode mode))))))
 
 ; Description: KeyListener to handle jumping
 ;
@@ -565,7 +606,6 @@
 ;
 ; sCOff = start of current offset
 ; eCOff = end of current offset
-
 (defn paintLine [g line offset dragState]
   (let [[offX offY] offset
         [sCOffX sCOffY] (dragState :p1)
@@ -593,7 +633,6 @@
 ;
 ; sCOff = start of current offset
 ; eCOff = end of current offset
-
 (defn paintObstacle [g obstacle offset dragState]
   (let [[offX offY] offset
         [sCOffX sCOffY] (dragState :p1)
